@@ -51,7 +51,7 @@
   .oos{background:var(--err-bg);color:var(--up)}
   .low{background:var(--warn-bg);color:var(--warn)}
   .up{color:var(--up)} .down{color:var(--down)}
-  .tbl{max-height:520px;overflow:auto}
+  .tbl{max-height:560px;overflow:auto}
   a{color:var(--primary);text-decoration:none}
   #msg{padding:40px;text-align:center;color:var(--muted)}
 </style>
@@ -78,6 +78,7 @@
     <div class="card"><h3>价格趋势 <span class="hint">点击下表行可单独查看/叠加 ASIN</span></h3><div id="cPrice" style="height:360px"></div></div>
     <div class="card"><h3>小类排名趋势 <span class="hint">越靠上排名越好</span></h3><div id="cBsr" style="height:360px"></div></div>
   </div>
+  <div class="card"><h3>大类排名趋势 <span class="hint">越靠上排名越好</span></h3><div id="cBig" style="height:340px"></div></div>
 
   <div class="card">
     <h3>ASIN 明细 <span class="hint">区间首日 → 末日变化；点击表头排序</span></h3>
@@ -154,6 +155,8 @@ function summary(groups) {
       dPrice: fp && lp ? (lp / fp - 1) : null, sub_bsr: last.sub_bsr, sub0: first.sub_bsr,
       dBsr: first.sub_bsr && last.sub_bsr ? first.sub_bsr - last.sub_bsr : null,
       bestBsr: Math.min(...a.map(x => x.sub_bsr || 1e9)), stock: last.stock, oosDays, sub_cat: last.sub_cat,
+      bsr: last.bsr, bsr0: first.bsr, dBig: first.bsr && last.bsr ? first.bsr - last.bsr : null,
+      big_cat: [...a].reverse().find(x => x.big_cat)?.big_cat || '',
       days: a.length, url: domain(state.site) + '/dp/' + asin };
   });
 }
@@ -187,7 +190,8 @@ function renderKpis(sum) {
 
 const COLS = [
   ['role','类型'],['brand','品牌'],['asin','ASIN'],['price','当前价'],['dPrice','价格变化'],
-  ['sub_bsr','小类排名'],['dBsr','排名变化'],['bestBsr','区间最佳'],['stock','库存'],['oosDays','缺货天数'],['sub_cat','小类']
+  ['sub_bsr','小类排名'],['dBsr','小类变化'],['bestBsr','小类最佳'],['sub_cat','小类名称'],
+  ['bsr','大类排名'],['dBig','大类变化'],['big_cat','大类名称'],['stock','库存'],['oosDays','缺货天数']
 ];
 function renderTable(sum) {
   const k = state.sortKey, dir = state.sortAsc ? 1 : -1;
@@ -201,20 +205,23 @@ function renderTable(sum) {
     const dp = s.dPrice == null || Math.abs(s.dPrice) < 0.001 ? '-' :
       `<span class="${s.dPrice < 0 ? 'down' : 'up'}">${s.dPrice > 0 ? '+' : ''}${(s.dPrice * 100).toFixed(1)}%</span>`;
     const db = !s.dBsr ? '-' : `<span class="${s.dBsr > 0 ? 'down' : 'up'}">${s.dBsr > 0 ? '↑' : '↓'}${Math.abs(s.dBsr)}</span>`;
+    const dbig = !s.dBig ? '-' : `<span class="${s.dBig > 0 ? 'down' : 'up'}">${s.dBig > 0 ? '↑' : '↓'}${Math.abs(s.dBig).toLocaleString()}</span>`;
     const st = s.stock === '缺货' ? '<span class="tag oos">缺货</span>' : String(s.stock || '').startsWith('仅剩') ? `<span class="tag low">${s.stock}</span>` : '有货';
     return `<tr data-a="${s.asin}" class="${state.sel.has(s.asin) ? 'sel' : ''}">
       <td><span class="tag ${s.role}">${s.role === 'own' ? '我方' : '竞品'}</span></td><td>${s.brand}</td>
       <td><a href="${s.url}" target="_blank" onclick="event.stopPropagation()">${s.asin}</a></td>
       <td class="n">${s.price != null ? c + s.price.toFixed(2) : '-'}</td><td class="n">${dp}</td>
       <td class="n">${s.sub_bsr ? '#' + s.sub_bsr : '-'}</td><td class="n">${db}</td><td class="n">${s.bestBsr < 1e9 ? '#' + s.bestBsr : '-'}</td>
-      <td>${st}</td><td class="n">${s.oosDays || '-'}</td><td>${s.sub_cat || ''}</td></tr>`;
+      <td>${s.sub_cat || ''}</td>
+      <td class="n">${s.bsr ? '#' + s.bsr.toLocaleString() : '-'}</td><td class="n">${dbig}</td><td>${s.big_cat || '-'}</td>
+      <td>${st}</td><td class="n">${s.oosDays || '-'}</td></tr>`;
   }).join('');
   document.querySelectorAll('#tbody tr').forEach(tr => tr.onclick = () => {
     const a = tr.dataset.a; state.sel.has(a) ? state.sel.delete(a) : state.sel.add(a); render();
   });
 }
 
-let chartP, chartB;
+let chartP, chartB, chartG;
 function renderCharts(groups, sum) {
   // 默认显示：选中的 ASIN；未选择时显示小类排名最好的 8 个（含我方）
   let show = [...state.sel].filter(a => groups[a]);
@@ -234,13 +241,14 @@ function renderCharts(groups, sum) {
     legend: { itemStyle: { fontWeight: 400, fontSize: '11px' } },
     plotOptions: { series: { connectNulls: false, animation: { duration: 400 } } },
   });
-  chartP && chartP.destroy(); chartB && chartB.destroy();
+  chartP && chartP.destroy(); chartB && chartB.destroy(); chartG && chartG.destroy();
   chartP = Highcharts.chart('cPrice', { ...base('价格', false, CUR[state.site]), series: mk('price') });
   chartB = Highcharts.chart('cBsr', { ...base('小类排名', true, '#'), series: mk('sub_bsr') });
+  chartG = Highcharts.chart('cBig', { ...base('大类排名', true, '#'), series: mk('bsr') });
 }
 
 function exportCsv() {
-  const rows = filtered(), keys = ['date','site','role','brand','asin','price','sub_bsr','sub_cat','bsr','stock','coupon'];
+  const rows = filtered(), keys = ['date','site','role','brand','asin','price','sub_bsr','sub_cat','bsr','big_cat','stock','coupon'];
   const csv = '\ufeff' + keys.join(',') + '\n' + rows.map(r => keys.map(k => `"${r[k] ?? ''}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
