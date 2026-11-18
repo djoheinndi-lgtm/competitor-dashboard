@@ -78,7 +78,12 @@
     <div class="card"><h3>价格趋势 <span class="hint">点击下表行可单独查看/叠加 ASIN</span></h3><div id="cPrice" style="height:360px"></div></div>
     <div class="card"><h3>小类排名趋势 <span class="hint">越靠上排名越好</span></h3><div id="cBsr" style="height:360px"></div></div>
   </div>
-  <div class="card"><h3>大类排名趋势 <span class="hint">越靠上排名越好</span></h3><div id="cBig" style="height:340px"></div></div>
+  <div class="grid2">
+    <div class="card"><h3>大类排名趋势 <span class="hint">越靠上排名越好</span></h3><div id="cBig" style="height:340px"></div></div>
+    <div class="card"><h3>Coupon / 促销力度趋势 <span class="hint">折扣%，无优惠记为 0</span>
+      <span class="seg" id="fCpn" style="float:right"><button data-c="coupon" class="on">仅Coupon+满减</button><button data-c="all">全部优惠</button></span></h3>
+      <div id="cCpn" style="height:340px"></div></div>
+  </div>
 
   <div class="card">
     <h3>ASIN 明细 <span class="hint">区间首日 → 末日变化；点击表头排序</span></h3>
@@ -92,7 +97,7 @@
 // 页面同目录的 data.json 由 competitor_monitor.py 每天自动生成并推送
 let RAW = window.DASH_DATA || null;
 const $ = id => document.getElementById(id);
-const state = { site: 'US', brand: 'all', role: 'all', from: '', to: '', sel: new Set(), sortKey: 'sub_bsr', sortAsc: true };
+const state = { cpn: 'coupon', site: 'US', brand: 'all', role: 'all', from: '', to: '', sel: new Set(), sortKey: 'sub_bsr', sortAsc: true };
 
 function boot(data) {
   RAW = data.rows;
@@ -127,6 +132,11 @@ function bind() {
     refreshBrands(); render();
   });
   $('csv').onclick = exportCsv;
+  document.querySelectorAll('#fCpn button').forEach(b => b.onclick = () => {
+    state.cpn = b.dataset.c;
+    document.querySelectorAll('#fCpn button').forEach(x => x.classList.toggle('on', x === b));
+    render();
+  });
 }
 function clearQuick() { document.querySelectorAll('#quick button').forEach(b => b.classList.remove('on')); }
 function refreshBrands() {
@@ -157,9 +167,15 @@ function summary(groups) {
       bestBsr: Math.min(...a.map(x => x.sub_bsr || 1e9)), stock: last.stock, oosDays, sub_cat: last.sub_cat,
       bsr: last.bsr, bsr0: first.bsr, dBig: first.bsr && last.bsr ? first.bsr - last.bsr : null,
       big_cat: [...a].reverse().find(x => x.big_cat)?.big_cat || '',
+      cpnNow: cpnLabel(last), cpnRaw: isCpn(last) ? last.coupon : '', cpnDays: a.filter(x => isCpn(x)).length,
       days: a.length, url: domain(state.site) + '/dp/' + asin };
   });
 }
+// Coupon：按 state.cpn 判断哪些优惠计入趋势
+const CPN_TYPES = { coupon: ['Coupon', '满减促销'], all: ['Coupon', '满减促销', '资格折扣', '赠品', '礼品清单', '其他优惠'] };
+const isCpn = x => !!x.coupon_type && CPN_TYPES[state.cpn].includes(x.coupon_type);
+const cpnLabel = x => isCpn(x) ? x.coupon_type + (x.coupon_pct ? ' ' + x.coupon_pct + '%' : '') : '';
+const esc = t => String(t || '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 const DOM = { US:'amazon.com', UK:'amazon.co.uk', DE:'amazon.de', FR:'amazon.fr', IT:'amazon.it', ES:'amazon.es' };
 const domain = s => 'https://www.' + DOM[s];
 const CUR = { US:'$', UK:'£', DE:'€', FR:'€', IT:'€', ES:'€' };
@@ -183,6 +199,7 @@ function renderKpis(sum) {
     ['竞品均价', cp ? c + cp.toFixed(2) : '-'],
     ['区间内降价竞品', down, down ? 'up' : ''],
     ['当前缺货竞品', oos, oos ? 'up' : ''],
+    ['当前有优惠竞品', comp.filter(s => s.cpnNow).length, comp.some(s => s.cpnNow) ? 'up' : ''],
     ['我方最佳小类排名', own?.sub_bsr ? '#' + own.sub_bsr : '-'],
   ];
   $('kpis').innerHTML = k.map(([l, v, cls]) => `<div class="kpi"><div class="l">${l}</div><div class="v ${cls || ''}">${v}</div></div>`).join('');
@@ -191,7 +208,7 @@ function renderKpis(sum) {
 const COLS = [
   ['role','类型'],['brand','品牌'],['asin','ASIN'],['price','当前价'],['dPrice','价格变化'],
   ['sub_bsr','小类排名'],['dBsr','小类变化'],['bestBsr','小类最佳'],['sub_cat','小类名称'],
-  ['bsr','大类排名'],['dBig','大类变化'],['big_cat','大类名称'],['stock','库存'],['oosDays','缺货天数']
+  ['bsr','大类排名'],['dBig','大类变化'],['big_cat','大类名称'],['cpnNow','当前优惠'],['cpnDays','优惠天数'],['stock','库存'],['oosDays','缺货天数']
 ];
 function renderTable(sum) {
   const k = state.sortKey, dir = state.sortAsc ? 1 : -1;
@@ -214,6 +231,7 @@ function renderTable(sum) {
       <td class="n">${s.sub_bsr ? '#' + s.sub_bsr : '-'}</td><td class="n">${db}</td><td class="n">${s.bestBsr < 1e9 ? '#' + s.bestBsr : '-'}</td>
       <td>${s.sub_cat || ''}</td>
       <td class="n">${s.bsr ? '#' + s.bsr.toLocaleString() : '-'}</td><td class="n">${dbig}</td><td>${s.big_cat || '-'}</td>
+      <td>${s.cpnNow ? `<span class="tag low" title="${esc(s.cpnRaw)}">${s.cpnNow}</span>` : '-'}</td><td class="n">${s.cpnDays || '-'}</td>
       <td>${st}</td><td class="n">${s.oosDays || '-'}</td></tr>`;
   }).join('');
   document.querySelectorAll('#tbody tr').forEach(tr => tr.onclick = () => {
@@ -221,7 +239,7 @@ function renderTable(sum) {
   });
 }
 
-let chartP, chartB, chartG;
+let chartP, chartB, chartG, chartC;
 function renderCharts(groups, sum) {
   // 默认显示：选中的 ASIN；未选择时显示小类排名最好的 8 个（含我方）
   let show = [...state.sel].filter(a => groups[a]);
@@ -241,14 +259,25 @@ function renderCharts(groups, sum) {
     legend: { itemStyle: { fontWeight: 400, fontSize: '11px' } },
     plotOptions: { series: { connectNulls: false, animation: { duration: 400 } } },
   });
-  chartP && chartP.destroy(); chartB && chartB.destroy(); chartG && chartG.destroy();
+  chartP && chartP.destroy(); chartB && chartB.destroy(); chartG && chartG.destroy(); chartC && chartC.destroy();
   chartP = Highcharts.chart('cPrice', { ...base('价格', false, CUR[state.site]), series: mk('price') });
   chartB = Highcharts.chart('cBsr', { ...base('小类排名', true, '#'), series: mk('sub_bsr') });
   chartG = Highcharts.chart('cBig', { ...base('大类排名', true, '#'), series: mk('bsr') });
+  // Coupon 趋势：阶梯线，折扣% ；tooltip 显示优惠类型和原文
+  const cpnSeries = show.map(a => {
+    const g = groups[a], own = g[0].role === 'own';
+    return { name: `${g[0].brand} ${a}`, step: 'left', dashStyle: own ? 'Solid' : 'ShortDash', lineWidth: own ? 3 : 1.6,
+      data: g.map(x => ({ x: ts(x.date), y: isCpn(x) ? (x.coupon_pct || 0) : 0, t: isCpn(x) ? x.coupon_type : '无', c: isCpn(x) ? x.coupon : '' })) };
+  });
+  chartC = Highcharts.chart('cCpn', { ...base('折扣 %', false, ''),
+    yAxis: { title: { text: '折扣 %' }, min: 0, allowDecimals: false, labels: { format: '{value}%' } },
+    tooltip: { shared: false, useHTML: true, xDateFormat: '%Y-%m-%d',
+      pointFormatter: function () { return `<b>${this.series.name}</b><br>${this.t}：${this.y}%<br><span style="color:#9ca3af">${esc(this.c)}</span>`; } },
+    series: cpnSeries });
 }
 
 function exportCsv() {
-  const rows = filtered(), keys = ['date','site','role','brand','asin','price','sub_bsr','sub_cat','bsr','big_cat','stock','coupon'];
+  const rows = filtered(), keys = ['date','site','role','brand','asin','price','sub_bsr','sub_cat','bsr','big_cat','coupon_type','coupon_pct','coupon','stock'];
   const csv = '\ufeff' + keys.join(',') + '\n' + rows.map(r => keys.map(k => `"${r[k] ?? ''}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
