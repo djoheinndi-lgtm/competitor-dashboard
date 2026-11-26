@@ -54,6 +54,16 @@
   .tbl{max-height:560px;overflow:auto}
   a{color:var(--primary);text-decoration:none}
   #msg{padding:40px;text-align:center;color:var(--muted)}
+  .thumb{position:relative;width:56px;height:56px;border:1px solid var(--border-l);border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:center}
+  .thumb img{max-width:52px;max-height:52px;object-fit:contain;cursor:zoom-in}
+  .thumb.empty{color:var(--muted);font-size:12px}
+  .thumb.chg{border:2px solid var(--warn)}
+  .thumb.chg.new{border-color:var(--up);box-shadow:0 0 0 2px var(--err-bg)}
+  .thumb .badge{position:absolute;top:-8px;right:-10px;background:var(--warn);color:#fff;font-size:10px;padding:0 4px;border-radius:8px;white-space:nowrap}
+  .thumb.chg.new .badge{background:var(--up)}
+  .thumb .old{position:absolute;left:62px;top:0;width:40px;height:40px;opacity:.55;border:1px dashed var(--border);border-radius:4px;background:#fff;display:none}
+  .thumb:hover .old{display:block}
+  td{vertical-align:middle}
 </style>
 </head>
 <body>
@@ -171,6 +181,10 @@ function summary(groups) {
       bsr: last.bsr, bsr0: prevBig, dBig: prevBig && last.bsr ? prevBig - last.bsr : null,
       big_cat: [...a].reverse().find(x => x.big_cat)?.big_cat || '',
       cpnNow: cpnLabel(last), cpnRaw: isCpn(last) ? last.coupon : '', cpnDays: a.filter(x => isCpn(x)).length,
+      img: [...a].reverse().find(x => x.image)?.image || '',
+      imgChanges: (() => { const ids = a.map(x => x.image_id).filter(Boolean); let n = 0, d = '', prev = '';
+        for (const x of a) { if (!x.image_id) continue; if (prev && x.image_id !== prev) { n++; d = x.date; } prev = x.image_id; }
+        return { n, last: d, prevImg: (() => { for (let i = a.length - 1; i > 0; i--) if (a[i].image_id && a[i-1].image_id && a[i].image_id !== a[i-1].image_id) return a[i-1].image; return ''; })() }; })(),
       days: a.length, url: domain(state.site) + '/dp/' + asin };
   });
 }
@@ -202,6 +216,7 @@ function renderKpis(sum) {
     ['竞品均价', cp ? c + cp.toFixed(2) : '-'],
     ['区间内降价竞品', down, down ? 'up' : ''],
     ['当前缺货竞品', oos, oos ? 'up' : ''],
+    ['区间内换主图竞品', comp.filter(s => s.imgChanges?.n).length, comp.some(s => s.imgChanges?.n) ? 'up' : ''],
     ['当前有优惠竞品', comp.filter(s => s.cpnNow).length, comp.some(s => s.cpnNow) ? 'up' : ''],
     ['我方最佳小类排名', own?.sub_bsr ? '#' + own.sub_bsr : '-'],
   ];
@@ -209,12 +224,13 @@ function renderKpis(sum) {
 }
 
 const COLS = [
-  ['role','类型'],['brand','品牌'],['asin','ASIN'],['price','当前价'],['dPrice','价格变化'],
+  ['img','主图'],['role','类型'],['brand','品牌'],['asin','ASIN'],['price','当前价'],['dPrice','价格变化'],
   ['sub_bsr','小类排名'],['dBsr','小类变化(较上次)'],['bestBsr','小类最佳'],['sub_cat','小类名称'],
   ['bsr','大类排名'],['dBig','大类变化(较上次)'],['big_cat','大类名称'],['cpnNow','当前优惠'],['cpnDays','优惠天数'],['stock','库存'],['oosDays','缺货天数']
 ];
 function renderTable(sum) {
   const k = state.sortKey, dir = state.sortAsc ? 1 : -1;
+  if (k === 'img') { sum.sort((a, b) => ((b.imgChanges?.n || 0) - (a.imgChanges?.n || 0)) * (state.sortAsc ? 1 : -1)); } else
   sum.sort((a, b) => ((a[k] ?? 1e12) > (b[k] ?? 1e12) ? 1 : (a[k] ?? 1e12) < (b[k] ?? 1e12) ? -1 : 0) * dir);
   $('thead').innerHTML = COLS.map(([key, l]) => `<th data-k="${key}">${l}${key === k ? (state.sortAsc ? ' ▲' : ' ▼') : ''}</th>`).join('');
   document.querySelectorAll('#thead th').forEach(th => th.onclick = () => {
@@ -227,7 +243,15 @@ function renderTable(sum) {
     const db = !s.dBsr ? '-' : `<span class="${s.dBsr > 0 ? 'down' : 'up'}">${s.dBsr > 0 ? '↑' : '↓'}${Math.abs(s.dBsr)}</span>`;
     const dbig = !s.dBig ? '-' : `<span class="${s.dBig > 0 ? 'down' : 'up'}">${s.dBig > 0 ? '↑' : '↓'}${Math.abs(s.dBig).toLocaleString()}</span>`;
     const st = s.stock === '缺货' ? '<span class="tag oos">缺货</span>' : String(s.stock || '').startsWith('仅剩') ? `<span class="tag low">${s.stock}</span>` : '有货';
+    const ic = s.imgChanges || {};
+    const recent = ic.last && ic.last >= state.to.slice(0, 10) ? 'new' : '';
+    const img = s.img ? `<div class="thumb ${ic.n ? 'chg ' + recent : ''}" title="${ic.n ? '区间内主图更换 ' + ic.n + ' 次，最近 ' + ic.last : '主图'}">
+        <img src="${s.img}" loading="lazy" referrerpolicy="no-referrer" onclick="event.stopPropagation();window.open('${s.img.replace('_AC_SX160_', '_AC_SL1000_')}')">
+        ${ic.n ? `<span class="badge">换图${ic.n > 1 ? '×' + ic.n : ''}</span>` : ''}
+        ${ic.prevImg ? `<img class="old" src="${ic.prevImg}" title="更换前主图" loading="lazy" referrerpolicy="no-referrer">` : ''}
+      </div>` : '<div class="thumb empty">-</div>';
     return `<tr data-a="${s.asin}" class="${state.sel.has(s.asin) ? 'sel' : ''}">
+      <td>${img}</td>
       <td><span class="tag ${s.role}">${s.role === 'own' ? '我方' : '竞品'}</span></td><td>${s.brand}</td>
       <td><a href="${s.url}" target="_blank" onclick="event.stopPropagation()">${s.asin}</a></td>
       <td class="n">${s.price != null ? c + s.price.toFixed(2) : '-'}</td><td class="n">${dp}</td>
@@ -280,7 +304,7 @@ function renderCharts(groups, sum) {
 }
 
 function exportCsv() {
-  const rows = filtered(), keys = ['date','site','role','brand','asin','price','sub_bsr','sub_cat','bsr','big_cat','coupon_type','coupon_pct','coupon','stock'];
+  const rows = filtered(), keys = ['date','site','role','brand','asin','price','sub_bsr','sub_cat','bsr','big_cat','coupon_type','coupon_pct','coupon','stock','image','image_id'];
   const csv = '\ufeff' + keys.join(',') + '\n' + rows.map(r => keys.map(k => `"${r[k] ?? ''}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
