@@ -96,7 +96,7 @@
   </div>
 
   <div class="card">
-    <h3>ASIN 明细 <span class="hint">价格：区间首日→末日｜排名：较上一次采集；点击表头排序</span></h3>
+    <h3>ASIN 明细 <span class="hint">价格、排名均较上一次采集；点击表头排序</span></h3>
     <div class="tbl"><table><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
   </div>
   <div id="msg"></div>
@@ -171,11 +171,11 @@ function summary(groups) {
     const first = a[0], last = a[a.length - 1];
     // 排名变化：与「上一次」有效采集对比（倒数第二条有排名的记录），不是与区间首日对比
     const prevWith = k => { for (let i = a.length - 2; i >= 0; i--) if (a[i][k]) return a[i][k]; return null; };
-    const prevSub = prevWith('sub_bsr'), prevBig = prevWith('bsr');
+    const prevSub = prevWith('sub_bsr'), prevBig = prevWith('bsr'), prevPrice = prevWith('price');
     const fp = a.find(x => x.price != null)?.price, lp = [...a].reverse().find(x => x.price != null)?.price;
     const oosDays = a.filter(x => x.stock === '缺货').length;
-    return { asin, brand: last.brand, role: last.role, price: lp, price0: fp,
-      dPrice: fp && lp ? (lp / fp - 1) : null, sub_bsr: last.sub_bsr,
+    return { asin, brand: last.brand, role: last.role, price: lp,
+      dPrice: prevPrice && last.price ? Math.round((last.price - prevPrice) * 100) / 100 : null, price0: prevPrice, sub_bsr: last.sub_bsr,
       dBsr: prevSub && last.sub_bsr ? prevSub - last.sub_bsr : null, sub0: prevSub,
       bestBsr: Math.min(...a.map(x => x.sub_bsr || 1e9)), stock: last.stock, oosDays, sub_cat: last.sub_cat,
       bsr: last.bsr, bsr0: prevBig, dBig: prevBig && last.bsr ? prevBig - last.bsr : null,
@@ -208,13 +208,13 @@ function renderKpis(sum) {
   const comp = sum.filter(s => s.role === 'comp'), c = CUR[state.site];
   const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   const cp = avg(comp.map(s => s.price).filter(Boolean));
-  const down = comp.filter(s => s.dPrice != null && s.dPrice <= -0.03).length;
+  const down = comp.filter(s => s.dPrice != null && s.dPrice < 0).length;
   const oos = comp.filter(s => s.stock === '缺货').length;
   const own = sum.filter(s => s.role === 'own').sort((a, b) => (a.sub_bsr || 1e9) - (b.sub_bsr || 1e9))[0];
   const k = [
     ['监控 ASIN', sum.length],
     ['竞品均价', cp ? c + cp.toFixed(2) : '-'],
-    ['区间内降价竞品', down, down ? 'up' : ''],
+    ['较上次降价竞品', down, down ? 'up' : ''],
     ['当前缺货竞品', oos, oos ? 'up' : ''],
     ['区间内换主图竞品', comp.filter(s => s.imgChanges?.n).length, comp.some(s => s.imgChanges?.n) ? 'up' : ''],
     ['当前有优惠竞品', comp.filter(s => s.cpnNow).length, comp.some(s => s.cpnNow) ? 'up' : ''],
@@ -224,7 +224,7 @@ function renderKpis(sum) {
 }
 
 const COLS = [
-  ['img','主图'],['role','类型'],['brand','品牌'],['asin','ASIN'],['price','当前价'],['dPrice','价格变化'],
+  ['img','主图'],['role','类型'],['brand','品牌'],['asin','ASIN'],['price','当前价'],['dPrice','价格变化(较上次)'],
   ['sub_bsr','小类排名'],['dBsr','小类变化(较上次)'],['bestBsr','小类最佳'],['sub_cat','小类名称'],
   ['bsr','大类排名'],['dBig','大类变化(较上次)'],['big_cat','大类名称'],['cpnNow','当前优惠'],['cpnDays','优惠天数'],['stock','库存'],['oosDays','缺货天数']
 ];
@@ -239,7 +239,7 @@ function renderTable(sum) {
   const c = CUR[state.site];
   $('tbody').innerHTML = sum.map(s => {
     const dp = s.dPrice == null || Math.abs(s.dPrice) < 0.001 ? '-' :
-      `<span class="${s.dPrice < 0 ? 'down' : 'up'}">${s.dPrice > 0 ? '+' : ''}${(s.dPrice * 100).toFixed(1)}%</span>`;
+      `<span class="${s.dPrice < 0 ? 'down' : 'up'}" title="上次 ${c}${s.price0?.toFixed(2)}">${s.dPrice > 0 ? '+' : '-'}${c}${Math.abs(s.dPrice).toFixed(2)}</span>`;
     const db = !s.dBsr ? '-' : `<span class="${s.dBsr > 0 ? 'down' : 'up'}">${s.dBsr > 0 ? '↑' : '↓'}${Math.abs(s.dBsr)}</span>`;
     const dbig = !s.dBig ? '-' : `<span class="${s.dBig > 0 ? 'down' : 'up'}">${s.dBig > 0 ? '↑' : '↓'}${Math.abs(s.dBig).toLocaleString()}</span>`;
     const st = s.stock === '缺货' ? '<span class="tag oos">缺货</span>' : String(s.stock || '').startsWith('仅剩') ? `<span class="tag low">${s.stock}</span>` : '有货';
